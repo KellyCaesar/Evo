@@ -31,7 +31,7 @@
     <span class="label">模式</span>
     <div class="seg" role="group" aria-label="模式">
       <a href="{{ url_with(mode=None, page=None, open=None) }}" class="{{ 'on' if not mode }}">全部</a>
-      {% for key, name in mode_filters.items() %}
+      {% for key, name in modes.items() %}
       <a href="{{ url_with(mode=key, page=None, open=None) }}" class="{{ 'on' if mode == key }}"{% if mode_titles[key] %} title="{{ mode_titles[key] }}"{% endif %}>{{ name }}</a>
       {% endfor %}
     </div>

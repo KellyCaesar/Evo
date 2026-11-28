@@ -1,9 +1,8 @@
-"""统计对账：排位、匹配、外卡、未知和其他各一局，本机和「全体玩家」用同一套口径。
+"""统计对账：模式分排位、匹配、外卡、其他四种（2026-11-28 用户定的，见 code/modes.py），本机和「全体玩家」用同一套口径。
 
-用其他模式验证非大逃杀对局的归类：
-- 全部模式 5 局
-- 大逃杀 3 局（排位 + 匹配 + 外卡）
-- 匹配分组 2 局（匹配和其他）、外卡 1 局、未知 1 局、排位 1 局
+排位、匹配、外卡各一局，"其他"三局：没认出模式的（None）、认出是别的玩法的（other）、不认识的值（tdm）：
+- 战绩页的 SQL 筛选（storage._where）、数据页"我的"（panel_app.mode_rows）、"全体玩家"里"你"的那份（global_stats）
+  每档的局数一样
 - 本机算出来的数和服务器的汇总（server/stats/worker.js，用 node 跑同一份数据）一致
 
 服务器的部分要有 Node.js 才跑（没有就跳过那几条，不算通过）。本机那部分不用 Node。
@@ -19,6 +18,7 @@ from pathlib import Path
 
 from fake_game import ROOT, report  # 要在项目代码之前导入
 
+import global_stats
 import modes
 import panel_app
 import storage
@@ -28,10 +28,10 @@ NODE = shutil.which("node")
 
 
 def local_db(path):
-    """排位、匹配、外卡、未知、其他各一局（同一份数据也给服务器用）。"""
+    """排位、匹配、外卡各一局，其他三局（同一份数据也给服务器用）。"""
     path.unlink(missing_ok=True)
     conn = storage.connect(path)
-    plan = [("ranked", 3), ("pubs", 5), ("wildcard", 2), (None, 11), ("other", 1)]
+    plan = [("ranked", 3), ("pubs", 5), ("wildcard", 2), (None, 11), ("other", 1), ("tdm", 4)]
     ids = []
     for i, (mode, place) in enumerate(plan):
         ids.append(storage.insert_match(conn, {
@@ -43,12 +43,14 @@ def local_db(path):
 
 
 def local_counts(path):
-    panel_app.app.config.update(DB=path, TESTING=True)
+    """{模式: 局数}，分别用战绩页的 SQL 筛选、数据页"我的"、"全体玩家"里"你"的那份算。"""
     conn = storage.connect(path)
     rows = storage.all_matches(conn)
+    sql = {key: storage.query_matches(conn, mode=key)[1] for key in modes.MODES}
     conn.close()
-    return {key: len(panel_app.mode_rows(rows, key))
-            for key in ("all", "br", "ranked", "pubs", "wildcard", "unknown")}
+    page = {key: len(panel_app.mode_rows(rows, key)) for key in modes.MODES}
+    mine = {key: len(global_stats._mine(rows, {}, "all", key, "all")) for key in modes.MODES}
+    return sql, page, mine
 
 
 def server_counts(path):
@@ -89,7 +91,7 @@ const res = await worker.fetch(new Request("https://stats.test/v1/report", {
 if (!res.ok) { console.error(await res.text()); process.exit(1); }
 const summary = JSON.parse(await (await worker.fetch(new Request("https://stats.test/v1/summary"), env, {})).text());
 const out = {};
-for (const key of ["all", "br", "ranked", "pubs", "wildcard", "unknown"]) out[key] = summary.slices[`all.${key}.all`].matches;
+for (const key of ["ranked", "pubs", "wildcard", "other"]) out[key] = summary.slices[`all.${key}.all`].matches;
 console.log(JSON.stringify(out));
 """
     payload = []
@@ -118,14 +120,19 @@ console.log(JSON.stringify(out));
 
 
 def main():
-    print("统计对账：排位、匹配、外卡、未知、其他各一局（计划第 4 节）")
+    print("统计对账：排位、匹配、外卡各一局，其他三局（没认出的、other、不认识的值）")
     folder = Path(__import__("tempfile").mkdtemp(prefix="evo-modes-"))
     try:
         path = folder / "modes.db"
         local_db(path)
-        counts = local_counts(path)
-        expected = {"all": 5, "br": 3, "ranked": 1, "pubs": 2, "wildcard": 1, "unknown": 1}
-        checks = {f"本机统计每档局数符合预期（{counts}）": counts == expected}
+        sql, page, mine = local_counts(path)
+        expected = {"ranked": 1, "pubs": 1, "wildcard": 1, "other": 3}
+        counts = page
+        checks = {
+            f"战绩页的筛选：每档局数对（{sql}）": sql == expected,
+            f"数据页\"我的\"：每档局数对（{page}）": page == expected,
+            f"\"全体玩家\"里你的那份：每档局数对（{mine}）": mine == expected,
+        }
         server = server_counts(path)
         if server is None:
             print("  ⏭ 服务器那几条跳过：没找到 Node.js（统计服务器是 JavaScript）")

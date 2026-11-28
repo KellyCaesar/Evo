@@ -42,7 +42,7 @@
   <div class="filter">
     <span class="label">模式</span>
     <div class="seg" role="group" aria-label="模式">
-      <a href="{{ url_for('stats', part=part, range=range_arg) }}" class="{{ 'on' if not mode_key }}">全部模式</a>
+      <a href="{{ url_for('stats', part=part, range=range_arg) }}" class="{{ 'on' if not mode_key }}">全部</a>
       {% for key, name in modes.items() %}
       <a href="{{ url_for('stats', part=part, range=range_arg, mode=key) }}" class="{{ 'on' if mode_key == key }}"{% if mode_titles[key] %} title="{{ mode_titles[key] }}"{% endif %}>{{ name }}</a>
       {% endfor %}
@@ -54,8 +54,8 @@
 {# 这个范围里还没有对局（新赛季刚开始）：不摆一排空卡片，只说清楚 #}
 <div class="card empty-card range-empty">{{ range_empty_text('stats', part=part) }}</div>
 {% elif not part %}
-{# 六维图（大图：图 + 旁边的数字表），在卡片上面占满一行 #}
-{{ radar_card(radar, 'big', ranges[range_key]) }}
+{# 六维图（大图：图 + 旁边的数字表），在卡片上面占满一行；只算排位，选了匹配、外卡、其他时没有（radar 是 None） #}
+{% if radar %}{{ radar_card(radar, 'big', ranges[range_key]) }}{% endif %}
 
 <div class="stats-grid">
 

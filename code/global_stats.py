@@ -10,7 +10,7 @@
 - 服务器能看到的和打开一个网页一样（IP 地址、时间；见隐私政策第三节）
 - 全体的数字按全队三个人算（自己 + 两名队友），武器除外（只有每名玩家自己的，队友的认不出）；
   "你"的数字在本机算（只用自己的数据库、选中的账号），和全体用同样的范围、模式、段位，同样不算待确认的局
-- "匹配"是不是排位的局（包括没认出模式的局：简体中文的匹配开局画面还没加进识别规则），和服务器一样
+- 模式分排位、匹配、外卡、其他四份（2026-11-28 用户定的）：没认出模式的局算"其他"，见 modes.group，和服务器一样
 
 测试时把 telemetry.STATS_URL 换成本机的测试地址（或者设环境变量 EVO_STATS_URL）。
 """
@@ -41,7 +41,7 @@ FORMAT = 1  # 汇总的格式版本（服务器的 SUMMARY_NAME = v1）
 # 本赛季从开赛后第一个整天算起（汇总里的 season_from，见 server/stats/worker.js 的 SEASON）
 RANGES = {"season": "本赛季", "all": "全部", "7d": "近 7 天"}
 DEFAULT_RANGE = "season"
-MODES = modes.STATS_MODES
+MODES = modes.LABELS  # 排位、匹配、外卡、其他（和服务器的 modeGroup 一样，见 modes.py）
 TIERS = {"all": "全部段位", "low": "白金及以下", "diamond": "钻石", "master": "大师以上"}  # 只有排位分段位
 TIER_ORDER = ("菜鸟", "青铜", "白银", "黄金", "白金", "钻石", "大师", "Apex 猎杀者")
 TIER_GROUP = {**{t: "low" for t in TIER_ORDER[:5]}, "钻石": "diamond", "大师": "master", "Apex 猎杀者": "master"}
@@ -145,17 +145,7 @@ def choose(args):
 
 
 def _mode_of(row):
-    """按与服务器 server/stats/worker.js 一致的模式口径归类。"""
-    return modes.stats_mode(row["mode"])
-
-
-def _in_mode(row, mode):
-    """全部模式包含每局，大逃杀按注册表归类，其余按公开统计分组筛选。"""
-    if mode == "all":
-        return True
-    if mode == "br":
-        return modes.is_br(row["mode"])
-    return _mode_of(row) == mode
+    return modes.group(row["mode"])
 
 
 def _mine(rows, summary, range_key, mode, tier):
@@ -167,7 +157,7 @@ def _mine(rows, summary, range_key, mode, tier):
         start = summary.get("season_from")
         if start is None:  # 老的汇总（服务器还没按赛季算）：没有本赛季，自己的也不算
             return []
-    return [r for r in rows if _in_mode(r, mode)
+    return [r for r in rows if _mode_of(r) == mode
             and (start is None or (r["ended_at"] or "")[:10] >= start)
             and (tier == "all" or TIER_GROUP.get(r["rank_tier"]) == tier)]
 

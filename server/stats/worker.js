@@ -231,10 +231,11 @@ async function remove(body, env) {
 }
 
 // ---------- 全体玩家的汇总（GET /v1/summary）----------
-// 范围（全部 / 近 7 天 / 本赛季）× 模式（排位 / 匹配 / 外卡 / 未知）× 段位（排位才分：全部 / 白金及以下 / 钻石 / 大师以上），
-// 键是 "范围.模式.段位"，如 "all.ranked.all"、"7d.ranked.diamond"、"season.pubs.all"、"all.wildcard.all"、"all.unknown.all"。
-// 模式口径与客户端 code/modes.py 一致：ranked 是排位，wildcard 是外卡，pubs 包含匹配和其他模式，
-// unknown 单独统计未识别模式。各游戏语言识别到的外卡共用 wildcard。每份汇总包含以下字段：
+// 范围（全部 / 近 7 天 / 本赛季）× 模式（排位 / 匹配 / 外卡 / 其他）× 段位（排位才分：全部 / 白金及以下 / 钻石 / 大师以上），共 21 份，
+// 键是 "范围.模式.段位"，如 "all.ranked.all"、"7d.ranked.diamond"、"season.pubs.all"、"all.wildcard.all"、"all.other.all"。
+// 模式和 Evo 的 code/modes.py 一样（2026-11-28 用户定的，见 modeGroup）：排位、匹配、外卡照原样，其余的都算"其他"：
+// 没认出模式的局（mode 是空的）、认出是别的玩法的（other；0.7.4、0.7.5b 把外卡也记成 other），和不认识的值。
+// 以前是"不是排位就算匹配"（连没认出模式的局一起），2026-11-28 改的。每份里：
 // - players、matches：多少个编号、多少局
 // - legends：每个传奇一行，按出场次数从多到少。全队三个人都算（队友多半是随机匹配到的；名次全队一样）：
 //   n 出场次数、pick 选用率（n ÷ 所有出场次数）、win 胜率、top5 前五率、place 场均名次、kills 场均击杀、
@@ -271,7 +272,7 @@ const SUMMARY_NAME = "v1";
 const SUMMARY_CRON = "7 * * * *";
 const DAYS_STATE = "v1_days";  // summary 表里记增量算到哪了的那一行（body 见 refreshSummary）
 const DAYS_DIRTY = "v1_dirty";  // /v1/delete 删过数据：body 是要重建的日子（JSON 数组），下一个小时重建
-const DAYS_VERSION = 3;  // 重新汇总已有战绩，保留其他模式的大逃杀归属
+const DAYS_VERSION = 2;  // summary_pairs、summary_days 的格式或者算法改了就加 1：部署以后下一个小时从头重建（2：分出外卡、其他，2026-11-28）
 const OVERLAP = 10 * 60 * 1000;  // 每次往前多读 10 分钟收到的局，和正在写进来的请求错开（同一局再算一遍，结果不变）
 // 一次最多读这么多新收到的局（Evo 出新版本、大家重发旧局时会多），剩下的下一个小时接着读，读完才出汇总。
 // 一个请求的局收到时间都一样（最多 100 局），所以每次都能往前读
@@ -310,33 +311,24 @@ function ratio(part, whole, digits) {
   return whole ? round(part / whole, digits) : null;
 }
 
-// 这一行（某个模式 m、段位组 g、是不是近 7 天、是不是本赛季）算进哪几份汇总。
-// m 是用于每日汇总的模式，other 单独保留到最后合并。
-// - all：每局都算一次（含历史未知模式），段位组不细分
-// - br：大逃杀 = 排位 + 匹配 + 外卡（有名次的玩法），段位组不细分；未知不算
-const BR_MODES = new Set(["ranked", "pubs", "wildcard"]);
+// 这一局算哪种模式（和 Evo 的 modes.group 一样）：排位、匹配、外卡照原样，其余的（空的、other、不认识的值）都算"其他"
+const MODES = ["ranked", "pubs", "wildcard", "other"];
+function modeGroup(mode) {
+  return MODES.includes(mode) ? mode : "other";
+}
 
+// 这一行（某个模式 m（modeGroup 分好的）、段位组 g、是不是近 7 天、是不是本赛季）算进哪几份汇总
 function sliceKeys(row) {
   const ranges = ["all", ...(row.recent ? ["7d"] : []), ...(row.season ? ["season"] : [])];
   const groups = row.m === "ranked" && row.g ? ["all", row.g] : ["all"];
-  const statsMode = row.m === "other" ? "pubs" : row.m;
-  const keys = ranges.flatMap((r) => groups.map((g) => `${r}.${statsMode}.${g}`));
-  for (const r of ranges) {
-    keys.push(`${r}.all.all`);
-    if (BR_MODES.has(row.m)) keys.push(`${r}.br.all`);
-  }
-  return keys;
+  return ranges.flatMap((r) => groups.map((g) => `${r}.${row.m}.${g}`));
 }
 
 function emptySlices() {
   const out = {};
   for (const r of RANGES) {
     for (const g of ["all", "low", "diamond", "master"]) out[`${r}.ranked.${g}`] = {};
-    out[`${r}.pubs.all`] = {};
-    out[`${r}.wildcard.all`] = {};
-    out[`${r}.unknown.all`] = {};
-    out[`${r}.all.all`] = {};
-    out[`${r}.br.all`] = {};
+    for (const m of MODES.slice(1)) out[`${r}.${m}.all`] = {};
   }
   return out;
 }
@@ -369,15 +361,9 @@ function points(values, digits) {
   return Array.from({ length: MAX_POINTS }, (_, i) => sorted[Math.round((i * (sorted.length - 1)) / (MAX_POINTS - 1))]);
 }
 
-// 一局里汇总用得到的几项，存进 summary_pairs（顺序见 pairParts）。
-// 每日汇总保留大逃杀的具体模式，另外记录未知和其他。
+// 一局里汇总用得到的几项，存进 summary_pairs（顺序见 pairParts）
 const GAME_COLUMNS = `id, k, day, mode, tier, review, placement, legend, mate1, mate2, kills, assists, damage, mate1_kills, mate1_damage,
   mate2_kills, mate2_damage, weapons`;
-// 每日汇总的模式分组，其他模式在生成公开统计时并进匹配。
-function modeGroup(mode) {
-  if (BR_MODES.has(mode)) return mode;
-  return mode === null || mode === undefined ? "unknown" : "other";
-}
 function snapshot(r) {
   return [modeGroup(r.mode), r.tier, r.review, r.placement, r.legend, r.mate1, r.mate2, r.kills, r.assists, r.damage,
           r.mate1_kills, r.mate1_damage, r.mate2_kills, r.mate2_damage, r.weapons === null ? null : JSON.parse(r.weapons)];

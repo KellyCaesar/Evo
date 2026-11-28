@@ -5,8 +5,9 @@
   （用户先说的"最强的那个玩家"，看了实际数字后改成前 5%：最强的往往只打了三四局，图会缩成一小块，来个新玩家就跳）。
   另一种颜色（虚线）画同分段玩家的平均。数字来自全体玩家的汇总（global_stats.py；服务器 worker.js 的 people）
 - 分段 = 最近一次读到的段位所在的组（白金及以下 / 钻石 / 大师以上，和"全体玩家"的段位筛选一样）；那一组玩家不到
-  MIN_PLAYERS 名、或者读不到段位，就和所有排位玩家比。范围里一局排位都没有时和匹配的玩家比
-- "你"的数字：页面上选的范围（近 30 局 / 全部）里、和比的玩家同一种模式的局；和服务器一样不算待确认的局（英雄池除外：
+  MIN_PLAYERS 名、或者读不到段位，就和所有排位玩家比
+- 只算排位局（2026-11-28 用户定的：匹配、外卡、其他都不算；以前范围里没有排位局时和匹配的玩家比）
+- "你"的数字：页面上选的范围（近 30 局 / 全部）里的排位局；和服务器一样不算待确认的局（英雄池除外：
   用了哪个传奇和读得准不准无关）；击杀来自经验值页的局不算进场均击杀和击杀参与（同总览页）
 - 击杀参与率 = (击杀 + 助攻) ÷ (击杀 + 助攻 + 老板分)：队友的击杀不是自己的助攻就是老板分，所以老板分越少越高。
   服务器上没有老板分（匿名统计不发），用 (击杀 + 助攻) ÷ 全队击杀，道理一样
@@ -105,16 +106,14 @@ def _side(i):
 
 def view(summary, rows, your_tier):
     """画图要用的。rows：页面上选的范围里的局（选中的账号）；your_tier：最近一次读到的段位（没有是 None）。
-    有排位局就用排位比（六维图是排位的指标）；一局排位都没有时用匹配的（外卡等轮换玩法不单独比，见 modes.py）。"""
-    ranked = [r for r in rows if r["mode"] == "ranked"]
-    mode = "ranked" if ranked or not rows else "pubs"
-    mine = ranked if mode == "ranked" else [r for r in rows if r["mode"] == "pubs"] or rows
-    group = global_stats.TIER_GROUP.get(your_tier) if mode == "ranked" else None
+    只算排位局（2026-11-28 用户定的：匹配、外卡、其他都不算，范围里一局排位都没有时 games 是 0）。"""
+    mine = [r for r in rows if r["mode"] == "ranked"]
+    group = global_stats.TIER_GROUP.get(your_tier)
     slices = summary.get("slices") or {}
-    part = slices.get(f"all.{mode}.{group}") if group else None
+    part = slices.get(f"all.ranked.{group}") if group else None
     if not part or len((part.get("people") or {}).get("damage") or []) < MIN_PLAYERS:
         group = "all"
-        part = slices.get(f"all.{mode}.all") or {}
+        part = slices.get("all.ranked.all") or {}
     people = part.get("people") or {}
     you = own_numbers(mine)
 
@@ -134,7 +133,7 @@ def view(summary, rows, your_tier):
         })
     you_known = [(i, a["you_r"]) for i, a in enumerate(axes) if a["you_r"] is not None]
     avg_known = [(i, a["avg_r"]) for i, a in enumerate(axes) if a["avg_r"] is not None]
-    compare = "匹配" if mode == "pubs" else GROUP_NAMES[group]
+    compare = GROUP_NAMES[group]
     return {
         "w": W, "h": H, "cx": CX, "cy": CY,
         "rings": [_points((i, r) for i in range(len(AXES))) for r in RINGS],
@@ -147,7 +146,6 @@ def view(summary, rows, your_tier):
         "compare": compare,
         "players": part.get("players", 0),
         "games": len(mine),
-        "mode": mode,
     }
 
 

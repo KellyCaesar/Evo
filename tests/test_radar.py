@@ -199,8 +199,12 @@ def checks():
     out["分段玩家太少（大师以上 3 名）：和全部段位比"] = (radar.view(SUMMARY, rows, "大师")["compare"] == "全部段位"
                                           and radar.view(SUMMARY, rows, "大师")["axes"][0]["top"] == "1,700")
     out["读不到段位：和全部段位比"] = radar.view(SUMMARY, rows, None)["compare"] == "全部段位"
-    pubs = radar.view(SUMMARY, [{**r, "mode": None} for r in rows], "钻石")
-    out["范围里没有排位局：和匹配的玩家比"] = pubs["compare"] == "匹配" and pubs["mode"] == "pubs"
+    for other in (None, "pubs", "wildcard", "other"):
+        no_ranked = radar.view(SUMMARY, [{**r, "mode": other} for r in rows], "钻石")
+        out[f"范围里只有{other}的局：只算排位，你是 0 局、不画你的形状，照旧和排位玩家比"] = (
+            no_ranked["games"] == 0 and no_ranked["you_points"] is None and no_ranked["compare"] == "钻石")
+    mixed = radar.view(SUMMARY, rows + [{**r, "mode": "wildcard", "damage": 9999} for r in rows], "钻石")
+    out["排位和外卡混在一起：只算排位那几局"] = mixed["games"] == len(rows) and mixed["axes"][0]["you"] == "5,000"
 
     # ---- 老的汇总（服务器加这几项以前的）----
     old = radar.view(OLD_SUMMARY, rows, "钻石")

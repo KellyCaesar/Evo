@@ -45,7 +45,7 @@ CN_WANT = dict(zip(FIELDS[:-1], ("wildcard", "风暴点", 3, 21, 6, 5, 9, 1515, 
 
 
 def config_checks():
-    """不用截图：三语的开局横幅、总结页标签和模式口径（哪些算大逃杀、哪些算排位）。"""
+    """不用截图：三语的开局横幅、总结页标签和模式口径（四种模式、哪种算排位）。"""
     zh = load_config("match_start.json", "zh-TW")
     en = load_config("match_start.json", "en")
     cn = load_config("match_start.json")
@@ -65,10 +65,12 @@ def config_checks():
             summary_en["wildcard"]["labels"] == {"revives": [], "respawns": []},
         "三种语言的总结页都跳过外卡的最后两行（不写进急救、重生）":
             all(set(skip_fields(cfg, modes.WILDCARD)) == {"revives", "respawns"} for cfg in (summary_cn, summary_tw, summary_en)),
-        "模式口径：大逃杀是排位、匹配、外卡；排位那套只在排位下用":
-            modes.BR_MODES == ("ranked", "pubs", "wildcard") and modes.is_br("wildcard")
+        "模式口径：排位、匹配、外卡、其他四种；没认出的、other、不认识的值都算其他；排位那套只在排位下用":
+            list(modes.LABELS.values()) == ["排位", "匹配", "外卡", "其他"]
+            and [modes.group(m) for m in ("ranked", "pubs", "wildcard", "other", None, "随便写的")]
+            == ["ranked", "pubs", "wildcard", "other", "other", "other"]
             and not modes.is_ranked("wildcard") and modes.is_ranked("ranked")
-            and modes.label("wildcard") == "外卡" and modes.normalize("随便写的") == "other",
+            and modes.label("wildcard") == "外卡" and modes.label("随便写的") == "其他" and modes.label(None) == "—",
     }
 
 
@@ -211,14 +213,14 @@ def teammate_skip_checks():
 
 def new_mode_interface_checks():
     """用测试模式 demo 验证注册表和配置能驱动总结页识别、字段跳过、分组和筛选：
-    - 注册表里的属性生效（is_br / is_ranked / stats_mode / mode_values）
+    - 注册表里的属性生效（is_ranked / group / where / label）
     - 结算页最后两行按 config/summary.json 的 demo 段认成 demo
     - skip_fields 按 demo 段取，summary_to_match 写模式并留空那几项"""
     import modes
     cfg = load_config("summary.json", "en")  # 使用英文配置，隔离其他语言的外卡标签。
     cfg = {**cfg, "demo": {"labels": {"revives": ["演示甲"], "respawns": ["演示乙"]},
                            "roi": cfg["wildcard"]["roi"], "skip_fields": ["revives", "respawns"]}}
-    demo = {"label": "演示玩法", "br": False, "ranked": False, "stats": True, "choices": True, "summary": "demo"}
+    demo = {"label": "演示玩法", "ranked": False, "summary": "demo"}
     registry = {**modes.MODES, "demo": demo}
 
     class FakeEngine:
@@ -235,10 +237,10 @@ def new_mode_interface_checks():
                    for name in ("placement", "squad_kills", "kda", "damage", "survival_time", "revives", "respawns")}
         match = summary_page.summary_to_match(results, [], None, None, "demo", skip)
         return {
-            "新模式只加注册表一条：大逃杀/排位/统计分组/筛选都跟着变":
-                not modes.is_br("demo") and not modes.is_ranked("demo")
-                and modes.stats_mode("demo") == "demo" and modes.mode_values("demo") == ["demo"]
-                and modes.summary_key("demo") == "demo",
+            "新模式只加注册表一条：排位/统计分组/筛选/显示的名字都跟着变":
+                not modes.is_ranked("demo") and modes.group("demo") == "demo"
+                and modes.where("demo") == ("mode = ?", ["demo"]) and "demo" in modes.where("other")[1]
+                and modes.label("demo") == "演示玩法" and modes.summary_key("demo") == "demo",
             "新模式的结算页两行对得上就认成这个模式（不用改记录程序）": detected == "demo",
             "新模式要跳过的字段从配置里取，写模式时留空": skip == ("revives", "respawns")
                 and match["mode"] == "demo" and match["revives"] is None and match["respawns"] is None,

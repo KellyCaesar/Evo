@@ -60,12 +60,13 @@
         {% endfor %}
       </div>
       <figcaption class="radar-key">
-        <span><i class="key-you"></i>你 · <span class="num">{{ radar.games }}</span> 局{{ '匹配' if radar.mode == 'pubs' else '排位' }}</span>
+        <span><i class="key-you"></i>你 · <span class="num">{{ radar.games }}</span> 局排位</span>
         <span><i class="key-avg"></i>{{ radar.compare }}平均</span>
         <span><i class="key-top"></i>外圈 = 前 5%</span>
       </figcaption>
       {% if size == 'small' %}<p class="radar-foot">和{{ radar.compare }}的 <span class="num">{{ radar.players }}</span> 名玩家比</p>{% endif %}
       {% if radar.partial %}<p class="radar-foot">全体玩家的数据还不全，有的项目还没法比，过一会儿再来看</p>
+      {% elif not radar.games %}<p class="radar-foot">这段时间还没有排位局（六维图只算排位）</p>
       {% elif not radar.you_points %}<p class="radar-foot">读到的数据太少，还画不出你的形状</p>{% endif %}
     </figure>
     <table class="stats-table radar-table{{ ' sr-only' if size == 'small' }}">
